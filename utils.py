@@ -129,7 +129,7 @@ def getTrainingData(coordAlpha, coordC, coordN, seq, pssm, msk, i, device='cpu')
         Ei = torch.diag(ei, k)
         D = D + Ei - Di
 
-    S = (D > 0) * (D < 4*(16 ** 2))
+    S = (D > 0) * (D < 3*(12 ** 2))
     I, J = torch.nonzero(S, as_tuple=True)
 
     I = I.to(device=device, non_blocking=True)
