@@ -213,6 +213,7 @@ class energyGraphNetwork(nn.Module):
             xe = torch.cat([gradX, intX], dim=1)
             #xe  = doubleLayer(xe, self.KE1[i], self.KE2[i])
             xe = doubleLayer(xe, self.KE[i], self.KE[i].t())
+
             divE = M*Graph.edgeDiv(xe[:,:self.nopen,:])
             aveE = M*Graph.edgeAve(xe[:,self.nopen:2*self.nopen,:])
 

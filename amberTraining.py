@@ -20,36 +20,49 @@ import constraints as cons
 #Mask, IDs, Seq, PSSM, ACC, Coords, SS, ASA, Seq_PDB, Coords_PDB, AmEn, AmEnSide, AmEnBB, AmEtotal = torch.load('AT_Energy_Array_100.pt')
 #Mask, IDs, Seq, PSSM, ACC, Coords, SS, ASA, Seq_PDB, Coords_PDB, AmEn, AmEnSide, AmEnBB, AmEtotal = torch.load('AT_Energy_Array_100_cutoff.pt')
 
-IDs, Seq, PSSM, Seq_PDB, Coords_PDB, AmEn, AmEnSide, AmEnBB, AmEtotal = torch.load('AT_E_PSSM.pt')
+IDs, Seq, PSSM, Seq_PDB, Coords_PDB, AmEn, AmEnSide, AmEnBB, AmEtotal = torch.load('AT_Energy_100_Final.pt')
 
 pltStat = False
-if pltStat:
+mu = torch.zeros(21)
+def energyPerRes(E,S, allEs=[torch.zeros(1)] * 20):
+    n = E.numel()
+    for i in range(n):
+        #print(S[i]-1)
+        allEs[S[i]-1] = torch.cat((allEs[S[i]-1], E[i].unsqueeze(0)))
 
-    def energyPerRes(E,S, allEs=[torch.zeros(1)] * 20):
-        n = E.numel()
-        for i in range(n):
-            #print(S[i]-1)
-            allEs[S[i]-1] = torch.cat((allEs[S[i]-1], E[i].unsqueeze(0)))
+    return allEs
 
-        return allEs
+allEs = energyPerRes(torch.tensor(AmEn[0]),torch.tensor(Seq[0]))
+for i in range(100):
+    ei = torch.tensor(AmEn[i])
+    #if ei.max() < 200:
+    allEs = energyPerRes(torch.tensor(AmEn[i]),torch.tensor(Seq[i]))
 
-    allEs = energyPerRes(torch.tensor(AmEn[0]),torch.tensor(Seq[0]))
-    for i in range(100):
-        ei = torch.tensor(AmEn[i])
-        #if ei.max() < 200:
-        allEs = energyPerRes(torch.tensor(AmEn[i]),torch.tensor(Seq[i]))
-
-    plt.figure(1)
-    i = 0
-    for j in range(4):
-        for k in range(5):
+plt.figure(1)
+i = 0
+for j in range(4):
+    for k in range(5):
+        if pltStat:
             plt.subplot(4,5,i+1)
-
             counts, bins = np.histogram(allEs[i].numpy(), bins=20)
             plt.hist(bins[:-1], bins, weights=counts)
             plt.title(i+1)
-            i += 1
 
+        mu[i] = allEs[i].mean()
+        sigma = allEs[i].std()
+        print('Res Type = %d    MeanE = %3.2e     StdE = %3.2e '%(i,mu[i],sigma))
+
+        i += 1
+
+#  \|dE(X)/dX \|^2   E = sum(e)  g = grad(E,X)[0]
+#  E(X + dX) = E(X) + dX^T \gradE
+#  E(X+dX1)   =  [1    dX1^T   ] [E(x)]
+#  E(X+dX2)      [1    dX2^T   ] [gradE]
+#   .            [1     .      ]
+#  E(X+dXn)      [1     dXn^T  ]
+#
+#    Ep   =  A g    min_g  1/2 \|Ag - Ep\|^2 + alpha \|g-g0\|^2
+#
 
 def simplexGrad(enet,xnS, X3, Graph, h=0.1, k=16):
     dE = torch.zeros(k)
@@ -73,8 +86,9 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 # ============================================================
 #
 
-nlayer = 6
-nopen = 32
+nlayer = 18
+nopen = 64
+eRes = nn.Parameter(mu)
 enet = eNet.energyGraphNetwork(nopen, nlayer)
 
 enet.to(device)
@@ -82,9 +96,9 @@ params = sum(p.numel() for p in enet.parameters())
 
 print('Number of parameters ', params)
 
-lr = 1e-2
+lr = 1e-3
 
-optimizer = optim.Adam([{'params': enet.parameters(), 'lr': lr}])
+optimizer = optim.Adam([{'params': enet.parameters(), 'lr': lr},{'params': eRes, 'lr': lr}])
 
 ndata = 100
 epochs = 100
@@ -120,12 +134,16 @@ for i in range(epochs):
         if nodes > 400:
             continue
 
-        # Generator
+        # compute energy
         Graph = GO.vectorGraph(I, J, nodes)
         X3 = CoordsBeta.clone()
         X3.requires_grad = True
         optimizer.zero_grad()
-        Ecomp = enet(xnS, X3, Graph)
+        Eout = enet(xnS, X3, Graph)
+        resType = xnS[:, 20:, :].squeeze().T
+        meanE = resType @ eRes
+        Ecomp = meanE + Eout
+
         # Collapse the energy to a single channel
         #grade = grad(Ecomp.sum(), X3, retain_graph=True)[0]
         #grade = simplexGrad(enet, xnS, X3, Graph, h=0.1, k=10)
